@@ -136,3 +136,6 @@ dump_temp/
 data_temp/
 icassp2024_exps/
 *.done
+
+wav2vec2_checkpoints/
+temp.wav
