@@ -7,7 +7,7 @@ freeze-mods: null
 ###########################################################
 #                FEATURE EXTRACTION SETTING               #
 ###########################################################
-sampling_rate: 24000     # Sampling rate.
+sampling_rate: 16000     # Sampling rate.
 fft_size: 1024           # FFT size.
 hop_size: 256            # Hop size.
 win_length: null         # Window length.
@@ -42,16 +42,16 @@ model_params:
     acdim: 100 # dimension for condition embedding after embedding layer
     conditiontype: "add" # dimension for condition embedding after embedding layer
     dprenet_layers: 2  # one more linear layer w/o non-linear will be added for 0_centor
-    dprenet_units: 256 # 256
-    adim: 768 # 384
-    aheads: 12 # 4
-    elayers: 12 # 6
-    eunits: 3072 # 1536
-    dlayers: 6 # 6
-    dunits: 3072 # 1536
+    dprenet_units: 128 # 256
+    adim: 192 # 384
+    aheads: 4 # 4
+    elayers: 4 # 6
+    eunits: 384 # 1536
+    dlayers: 4 # 6
+    dunits: 384 # 1536
     postnet_layers: 5
     postnet_filts: 5
-    postnet_chans: 256 # 256
+    postnet_chans: 128 # 256
     use_batch_norm: True
     encoder_normalize_before: True
     decoder_normalize_before: False

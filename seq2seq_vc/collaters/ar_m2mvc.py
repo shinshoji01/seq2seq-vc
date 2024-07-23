@@ -51,6 +51,8 @@ class ARM2MVCCollater(object):
         xembs = torch.from_numpy(xembs).float()
         yembs = np.concatenate([b["trg_condition"].reshape(1,-1) for b in batch], axis=0)
         yembs = torch.from_numpy(yembs).float()
+        
+        accents = torch.Tensor(np.array([b["accent_id"] for b in batch])).long()
 
         # get list of lengths (must be tensor for DataParallel)
         ilens = torch.from_numpy(np.array([x.shape[0] for x in xs])).long()
@@ -74,6 +76,7 @@ class ARM2MVCCollater(object):
             "xembs": xembs,
             "yembs": yembs,
             "spembs": None,
+            "accents": accents,
         }
 
         return items

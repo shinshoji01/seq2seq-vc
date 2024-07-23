@@ -36,19 +36,19 @@ trg_feat: mel
 ###########################################################
 model_type: M2MVTN
 model_params:
-    idim: 1024
+    idim: 100
     odim: 100
     cdim: 1024 # dimension for condition embedding
     acdim: 100 # dimension for condition embedding after embedding layer
     conditiontype: "add" # dimension for condition embedding after embedding layer
     dprenet_layers: 2  # one more linear layer w/o non-linear will be added for 0_centor
     dprenet_units: 256 # 256
-    adim: 768 # 384
-    aheads: 12 # 4
-    elayers: 12 # 6
-    eunits: 3072 # 1536
+    adim: 384 # 384
+    aheads: 4 # 4
+    elayers: 6 # 6
+    eunits: 1536 # 1536
     dlayers: 6 # 6
-    dunits: 3072 # 1536
+    dunits: 1536 # 1536
     postnet_layers: 5
     postnet_filts: 5
     postnet_chans: 256 # 256
@@ -103,9 +103,9 @@ scheduler_params:
 ###########################################################
 #                    INTERVAL SETTING                     #
 ###########################################################
-train_max_steps: 500000 # 300000,100000                # Number of training steps.
-save_interval_steps: 20000 # 20000,10000              # Interval steps to save checkpoint.
-eval_interval_steps: 20000 # 2000,1000              # Interval steps to evaluate the network.
+train_max_steps: 300000                 # Number of training steps.
+save_interval_steps: 20000               # Interval steps to save checkpoint.
+eval_interval_steps: 20000               # Interval steps to evaluate the network.
 log_interval_steps: 10                 # Interval steps to record the training log.
 
 ###########################################################

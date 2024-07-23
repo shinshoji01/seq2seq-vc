@@ -2,7 +2,7 @@
 #                  FINE-TUNING SETTING                    #
 ###########################################################
 init-mods: ["encoder", "decoder", "feat_out", "prob_out", "postnet", "condition_encoding_embedding", "condition_decoding_embedding"]
-freeze-mods: null
+freeze-mods: ["decoder"]
 
 ###########################################################
 #                FEATURE EXTRACTION SETTING               #
@@ -34,7 +34,7 @@ trg_feat: mel
 ###########################################################
 #              NETWORK ARCHITECTURE SETTING               #
 ###########################################################
-model_type: M2MVTN
+model_type: M2MVTNPro
 model_params:
     idim: 1024
     odim: 100
@@ -43,12 +43,12 @@ model_params:
     conditiontype: "add" # dimension for condition embedding after embedding layer
     dprenet_layers: 2  # one more linear layer w/o non-linear will be added for 0_centor
     dprenet_units: 256 # 256
-    adim: 768 # 384
-    aheads: 12 # 4
-    elayers: 12 # 6
-    eunits: 3072 # 1536
+    adim: 384 # 384
+    aheads: 4 # 4
+    elayers: 6 # 6
+    eunits: 1536 # 1536
     dlayers: 6 # 6
-    dunits: 3072 # 1536
+    dunits: 1536 # 1536
     postnet_layers: 5
     postnet_filts: 5
     postnet_chans: 256 # 256
@@ -58,14 +58,15 @@ model_params:
     encoder_concat_after: False
     decoder_concat_after: False
     decoder_reduction_factor: 4
+    accentnum: 6
 
 ###########################################################
 #                      LOSS SETTING                       #
 ###########################################################
-trainer_type: ARM2MVCTrainer
+trainer_type: ARM2MVCADVTrainer
 collater_type: ARM2MVCCollater
 criterions:
-    "Seq2SeqLoss":
+    "Seq2SeqAdvLoss":
         bce_pos_weight: 10.0
 
 ###########################################################
@@ -83,7 +84,7 @@ inference:
 ###########################################################
 #                  DATA LOADER SETTING                    #
 ###########################################################
-batch_size: 64              # Batch size.
+batch_size: 16              # Batch size.
 pin_memory: true            # Whether to pin memory in Pytorch DataLoader.
 num_workers: 2              # Number of workers in Pytorch DataLoader.
 allow_cache: true           # Whether to allow cache in dataset. If true, it requires cpu memory.
@@ -103,9 +104,9 @@ scheduler_params:
 ###########################################################
 #                    INTERVAL SETTING                     #
 ###########################################################
-train_max_steps: 500000 # 300000,100000                # Number of training steps.
+train_max_steps: 300000 # 300000,100000                # Number of training steps.
 save_interval_steps: 20000 # 20000,10000              # Interval steps to save checkpoint.
-eval_interval_steps: 20000 # 2000,1000              # Interval steps to evaluate the network.
+eval_interval_steps: 10000 # 2000,1000              # Interval steps to evaluate the network.
 log_interval_steps: 10                 # Interval steps to record the training log.
 
 ###########################################################

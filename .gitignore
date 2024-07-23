@@ -138,4 +138,9 @@ icassp2024_exps/
 *.done
 
 wav2vec2_checkpoints/
-temp.wav
+temp.*
+example.wav
+notebooks/test/
+notebooks/ckpts/
+notebooks/*.py
+notebooks/*.npy

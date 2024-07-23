@@ -1,5 +1,6 @@
 import logging
 import torch
+import numpy as np
 
 from seq2seq_vc.layers.positional_encoding import ScaledPositionalEncoding
 from seq2seq_vc.modules.transformer.encoder import Encoder as TransformerEncoder
@@ -10,14 +11,60 @@ from seq2seq_vc.modules.transformer.mask import subsequent_mask
 from seq2seq_vc.layers.utils import make_non_pad_mask
 from seq2seq_vc.modules.transformer.attention import MultiHeadedAttention
 
+import sys
+sys.path.append("/home/shoinoue/Git/GradientReversal/")
+from gradient_reversal import GradientReversal
 
-class M2MVTN(torch.nn.Module): # many-to-many VTN
+
+# https://pub.aimind.so/creating-sinusoidal-positional-embedding-from-scratch-in-pytorch-98c49e153d6?gi=a96c7163d443
+def sinusoidal_positional_embedding(token_sequence_size, token_embedding_dim, n=10000.0):
+
+    if token_embedding_dim % 2 != 0:
+        raise ValueError("Sinusoidal positional embedding cannot apply to odd token embedding dim (got dim={:d})".format(token_embedding_dim))
+
+    T = token_sequence_size
+    d = token_embedding_dim #d_model=head_num*d_k, not d_q, d_k, d_v
+
+    positions = torch.arange(0, T).unsqueeze_(1)
+    embeddings = torch.zeros(T, d)
+
+    denominators = torch.pow(n, 2*torch.arange(0, d//2)/d) # 10000^(2i/d_model), i is the index of embedding
+    embeddings[:, 0::2] = torch.sin(positions/denominators) # sin(pos/10000^(2i/d_model))
+    embeddings[:, 1::2] = torch.cos(positions/denominators) # cos(pos/10000^(2i/d_model))
+
+    return embeddings
+
+class SequentialAdversalrialLayer(torch.nn.Module):
+    def __init__(self, lbd, idim, odim):
+        # initialize base classes
+        torch.nn.Module.__init__(self)
+        
+        self.gradient_reversal = GradientReversal(lbd)
+        self.classifier = torch.nn.Linear(idim, odim)
+        self.posemb = sinusoidal_positional_embedding(10000, 384)
+
+    def forward(self, x, xmasks):
+        x = self._get_averaged_embedding(x, xmasks)
+        x = self.gradient_reversal(x)
+        x = self.classifier(x)
+        return x
+    
+    def _get_averaged_embedding(self, x, xmasks):
+        posemb = self.posemb[:x.shape[1], :]
+        x_pos = x+posemb.unsqueeze(0).to(x.device)
+        xmasks = xmasks[:,0,:].unsqueeze(-1)
+        x = torch.sum(x_pos*xmasks, axis=1)/xmasks.sum(1)
+        return x
+
+
+class M2MVTNPro(torch.nn.Module): # many-to-many VTN
     def __init__(
         self,
         idim,
         odim,
         cdim,
         acdim,
+        accentnum=6,
         conditiontype="add",
         dprenet_layers=2,
         dprenet_units=256,
@@ -206,6 +253,23 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         self.condition_encoding_embedding = torch.nn.Linear(cdim, acdim)
         self.condition_decoding_embedding = torch.nn.Linear(cdim, acdim)
         self.conditiontype = conditiontype
+        idim_encoder = adim+acdim 
+        self.pronunciation_encoder = TransformerEncoder(
+            idim=adim+acdim,
+            attention_dim=adim,
+            attention_heads=8,
+            linear_units=eunits,
+            num_blocks=4,
+            input_layer="linear",
+            pos_enc_class=ScaledPositionalEncoding,
+            normalize_before=encoder_normalize_before,
+            concat_after=encoder_concat_after,
+            positionwise_layer_type=positionwise_layer_type,  # V
+            positionwise_conv_kernel_size=positionwise_conv_kernel_size,  # V
+            dropout_rate=transformer_enc_dropout_rate,
+        )
+        lbd = 0.5
+        self.sequential_adversarial_layer = SequentialAdversalrialLayer(lbd, adim, accentnum)
 
     def _reset_parameters(self, init_enc_alpha: float, init_dec_alpha: float):
         # initialize alpha in scaled positional encoding
@@ -214,7 +278,7 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         if self.decoder_type == "transformer":
             self.decoder.embed[-1].alpha.data = torch.tensor(init_dec_alpha)
 
-    def forward(self, xs, ilens, ys, labels, olens, xembs, yembs, spembs=None, *args, **kwargs):
+    def forward(self, xs, ilens, ys, labels, olens, xembs, yembs, accentlabels, spembs=None, *args, **kwargs):
         max_ilen = max(ilens)
         max_olen = max(olens)
         if max_ilen != xs.shape[1]:
@@ -227,8 +291,8 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         # forward encoder
         x_masks = self._source_mask(ilens).to(xs.device)
         # xs = torch.cat([xs, xembs], -1) # Combine
-        xembs = self.condition_encoding_embedding(xembs)
-        xembs = torch.tile(xembs.unsqueeze(1), (1, xs.shape[1], 1))
+        # xembs = self.condition_encoding_embedding(xembs)
+        # xembs = torch.tile(xembs.unsqueeze(1), (1, xs.shape[1], 1))
         if self.conditiontype=="add":
             xs = xs + xembs
         elif self.conditiontype=="concat":
@@ -236,6 +300,14 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         elif self.conditiontype=="nocondition":
             pass
         hs, hs_masks = self.encoder(xs, x_masks)
+        # advfeatures = torch.tensor(np.random.randn(hs.shape[0],6)).to(hs.device)
+        advfeatures = self.sequential_adversarial_layer(hs, hs_masks)
+        
+        # pronunciation fitting
+        yembs = self.condition_encoding_embedding(yembs)
+        yembs = torch.tile(yembs.unsqueeze(1), (1, hs.shape[1], 1))
+        hs = torch.cat([hs, yembs], axis=-1)
+        hs, hs_masks = self.pronunciation_encoder(hs, hs_masks)
 
         # integrate speaker embedding
         if self.spk_embed_dim is not None:
@@ -264,9 +336,8 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
 
         # forward decoder
         y_masks = self._target_mask(olens_in).to(xs.device)
-        
-        yembs = self.condition_decoding_embedding(yembs)
-        yembs = torch.tile(yembs.unsqueeze(1), (1, ys_in.shape[1], 1))
+        # yembs = self.condition_decoding_embedding(yembs)
+        # yembs = torch.tile(yembs.unsqueeze(1), (1, ys_in.shape[1], 1))
         if self.conditiontype=="add":
             ys_in = ys_in + yembs
         elif self.conditiontype=="concat":
@@ -329,42 +400,8 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
             labels,
             olens,
             (att_ws, ilens_ds_st, olens_in),
+            (advfeatures, accentlabels),
         )
-    
-    def _get_encoded_features(self, x, inference_args, xembs, yembs, spemb=None, *args, **kwargs):
-        """Generate the sequence of features given the sequences of acoustic features.
-
-        Args:
-            x (Tensor): Input sequence of acoustic features (T, idim).
-            inference_args (dict):
-                - threshold (float): Threshold in inference.
-                - minlenratio (float): Minimum length ratio in inference.
-                - maxlenratio (float): Maximum length ratio in inference.
-            spemb (Tensor, optional): Speaker embedding vector (spk_embed_dim).
-
-        Returns:
-            Tensor: Output sequence of features (L, odim).
-            Tensor: Output sequence of stop probabilities (L,).
-            Tensor: Encoder-decoder (source) attention weights (#layers, #heads, L, T).
-
-        """
-        # get options
-        threshold = inference_args["threshold"]
-        minlenratio = inference_args["minlenratio"]
-        maxlenratio = inference_args["maxlenratio"]
-
-        # forward encoder
-        x = x.unsqueeze(0)
-        xembs = self.condition_encoding_embedding(xembs)
-        xembs = torch.tile(xembs.unsqueeze(1), (1, x.shape[1], 1))
-        if self.conditiontype=="add":
-            x = x + xembs
-        elif self.conditiontype=="concat":
-            x = torch.cat([x, xembs], axis=-1)
-        elif self.conditiontype=="nocondition":
-            pass
-        hs, _ = self.encoder(x, None)
-        return hs
 
     def inference(self, x, inference_args, xembs, yembs, spemb=None, *args, **kwargs):
         """Generate the sequence of features given the sequences of acoustic features.
@@ -390,16 +427,21 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
 
         # forward encoder
         x = x.unsqueeze(0)
-        xembs = self.condition_encoding_embedding(xembs)
-        xembs = torch.tile(xembs.unsqueeze(1), (1, x.shape[1], 1))
+        # xembs = self.condition_encoding_embedding(xembs)
+        # xembs = torch.tile(xembs.unsqueeze(1), (1, x.shape[1], 1))
         if self.conditiontype=="add":
             x = x + xembs
         elif self.conditiontype=="concat":
             x = torch.cat([x, xembs], axis=-1)
         elif self.conditiontype=="nocondition":
             pass
-        hs, _ = self.encoder(x, None)
+        hsen, _ = self.encoder(x, None)
         
+        # pronunciation fitting
+        yembs = self.condition_encoding_embedding(yembs)
+        yembs = torch.tile(yembs.unsqueeze(1), (1, hsen.shape[1], 1))
+        hs = torch.cat([hsen, yembs], axis=-1)
+        hs, _ = self.pronunciation_encoder(hs, None)
 
         # integrate speaker embedding
         if self.spk_embed_dim is not None:
@@ -415,7 +457,7 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         ys = hs.new_zeros(1, 1, self.odim)
         outs, probs = [], []
         
-        yembs = self.condition_decoding_embedding(yembs)
+        # yembs = self.condition_decoding_embedding(yembs)
         def ycondition(ys):
             condition = torch.tile(yembs.unsqueeze(1), (1, ys.shape[1], 1))
             if self.conditiontype=="add":
@@ -478,7 +520,49 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         # concatenate attention weights -> (#layers, #heads, L, T)
         att_ws = torch.stack(att_ws, dim=0)
 
-        return outs, probs, att_ws
+        return outs, probs, att_ws, hsen
+    
+    def _get_encoded_features(self, x, inference_args, xembs, yembs, spemb=None, *args, **kwargs):
+        """Generate the sequence of features given the sequences of acoustic features.
+
+        Args:
+            x (Tensor): Input sequence of acoustic features (T, idim).
+            inference_args (dict):
+                - threshold (float): Threshold in inference.
+                - minlenratio (float): Minimum length ratio in inference.
+                - maxlenratio (float): Maximum length ratio in inference.
+            spemb (Tensor, optional): Speaker embedding vector (spk_embed_dim).
+
+        Returns:
+            Tensor: Output sequence of features (L, odim).
+            Tensor: Output sequence of stop probabilities (L,).
+            Tensor: Encoder-decoder (source) attention weights (#layers, #heads, L, T).
+
+        """
+        # get options
+        threshold = inference_args["threshold"]
+        minlenratio = inference_args["minlenratio"]
+        maxlenratio = inference_args["maxlenratio"]
+
+        # forward encoder
+        x = x.unsqueeze(0)
+        # xembs = self.condition_encoding_embedding(xembs)
+        # xembs = torch.tile(xembs.unsqueeze(1), (1, x.shape[1], 1))
+        if self.conditiontype=="add":
+            x = x + xembs
+        elif self.conditiontype=="concat":
+            x = torch.cat([x, xembs], axis=-1)
+        elif self.conditiontype=="nocondition":
+            pass
+        hsen, _ = self.encoder(x, None)
+        
+        # pronunciation fitting
+        yembs = self.condition_encoding_embedding(yembs)
+        yembs = torch.tile(yembs.unsqueeze(1), (1, hsen.shape[1], 1))
+        hs = torch.cat([hsen, yembs], axis=-1)
+        hs, _ = self.pronunciation_encoder(hs, None)
+        
+        return hsen, hs
 
     def calculate_all_attentions(
         self,
