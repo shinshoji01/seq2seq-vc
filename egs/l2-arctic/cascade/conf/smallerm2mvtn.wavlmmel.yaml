@@ -40,7 +40,7 @@ model_params:
     odim: 100
     cdim: 1024 # dimension for condition embedding
     acdim: 100 # dimension for condition embedding after embedding layer
-    conditiontype: "add" # dimension for condition embedding after embedding layer
+    conditiontype: "nocondition" # dimension for condition embedding after embedding layer
     dprenet_layers: 2  # one more linear layer w/o non-linear will be added for 0_centor
     dprenet_units: 128 # 256
     adim: 192 # 384

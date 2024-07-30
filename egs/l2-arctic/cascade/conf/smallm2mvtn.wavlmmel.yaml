@@ -40,7 +40,7 @@ model_params:
     odim: 100
     cdim: 1024 # dimension for condition embedding
     acdim: 100 # dimension for condition embedding after embedding layer
-    conditiontype: "add" # dimension for condition embedding after embedding layer
+    conditiontype: "nocondition" # dimension for condition embedding after embedding layer
     dprenet_layers: 2  # one more linear layer w/o non-linear will be added for 0_centor
     dprenet_units: 256 # 256
     adim: 384 # 384
@@ -83,7 +83,7 @@ inference:
 ###########################################################
 #                  DATA LOADER SETTING                    #
 ###########################################################
-batch_size: 64              # Batch size.
+batch_size: 32              # Batch size.
 pin_memory: true            # Whether to pin memory in Pytorch DataLoader.
 num_workers: 2              # Number of workers in Pytorch DataLoader.
 allow_cache: true           # Whether to allow cache in dataset. If true, it requires cpu memory.

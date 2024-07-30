@@ -23,14 +23,30 @@ def transform(mel, defileprob=0.08, defilespan=10, defiling_ratio=[0.45, 0.45, 0
 class PretrainingMelDataset(Dataset):
     def __init__(self, feat_base_dir, dataset_dir, scaler, mode="train", limitlength=450, defiling_ratio=[0.45,0.45,0.10], input_output_type=["mel", "mel"]):
         modename = "dev" if mode=="valid" else mode
+        inputname = "" if input_output_type[0]=="mel" else f"_{input_output_type[0]}"
+        if inputname=="_hubert":
+            inputname = "_hubert_km500"
+        outputname = "" if input_output_type[1]=="mel" else f"_{input_output_type[1]}"
+
         speakers = [os.path.basename(a) for a in glob.glob(dataset_dir + "*/*")]
         speakers.sort()
         files = []
         for spk in speakers:
-            files += glob.glob(feat_base_dir + f"{modename}*/{spk}/*/*[0-9].npy")
-        files.sort()
+            for pt in glob.glob(feat_base_dir + f"{modename}*/{spk}/*/*[0-9]{inputname}.npy"):
+                if inputname=="":
+                    if "_hubert_km500" in pt:
+                        continue
+                files += [pt]
+        ifiles = []
+        ofiles = []
+        for path in files:
+            opath = os.path.dirname(path) + "/" + os.path.basename(path)[:-(4+len(inputname))]+f"{outputname}.npy"
+            if os.path.exists(opath):
+                ifiles += [path]
+                ofiles += [opath]
             
-        self.files = files
+        self.ifiles = ifiles
+        self.files = ofiles
         self.scaler = scaler
         self.mode = mode
         self.limitlength = limitlength
@@ -41,14 +57,14 @@ class PretrainingMelDataset(Dataset):
         return len(self.files)
     def __getitem__(self, idx):
         
+        inputpath = self.ifiles[idx]
         outputpath = self.files[idx]
         accpath = outputpath[:-4] + "_accentembedding.npy"
         input_type = self.input_output_type[0]
-        if input_type=="mel":
-            inputpath = outputpath
+        if input_type=="hubert":
+            inputfeat = np.load(inputpath).reshape(-1, 1).astype(int)
         else:
-            inputpath = outputpath[:-4] + f"_{input_type}.npy"
-        inputfeat = self.scaler[0].transform(np.load(inputpath).T)
+            inputfeat = self.scaler[0].transform(np.load(inputpath).T)
         outputfeat = self.scaler[1].transform(np.load(outputpath).T)
         if outputfeat.shape[0]>self.limitlength:
             start = np.random.randint(0, outputfeat.shape[0]-self.limitlength)
@@ -71,7 +87,6 @@ class PretrainingMelDataset(Dataset):
         
         return items
 
-    
 class Parallelo2oVCMelDataset(Dataset):
     def __init__(self, dataset_dir, speakers, src_spk, trg_spk, datasplit, scaler, mode="train", randomcondition=False):
         modefiles = datasplit[["train", "valid", "test"].index(mode)]
@@ -160,5 +175,44 @@ class PretrainingL2Arctic(Dataset):
         items["speaker_id"] = speaker
         items["accent_id"] = accent
         items["gender_id"] = gender
+        
+        return items
+    
+class ParallelArcticDataset(Dataset):
+    def __init__(self, src_dir, trg_dir, datasplit, scaler, mode="train", input_output=["wavlm", "mel"]):
+        modefiles = datasplit[["train", "valid", "test"].index(mode)]
+        filenames = [os.path.basename(a)[:-4] for a in glob.glob(src_dir+f"{input_output[0]}/*")]
+        filenames.sort()
+        files = []
+        for fn in filenames:
+            if fn in modefiles:
+                exist = True
+                if not(os.path.exists(f"{trg_dir}{input_output[1]}/{fn}.npy")):
+                    exist = False
+                    break
+                if exist:
+                    files += [fn]
+        data = {}
+        data["src"] = [src_dir + f"{input_output[0]}/{fn}.npy" for fn in files]
+        data["trg"] = [trg_dir + f"{input_output[1]}/{fn}.npy" for fn in files]
+            
+        self.data = data
+        self.scaler = scaler
+        self.files = files
+        self.input_output = input_output
+        
+    def __len__(self):
+        return len(self.files)
+    
+    def __getitem__(self, idx):
+        items = {}
+        src_mel = self.data["src"][idx]
+        trg_mel = self.data["trg"][idx]
+        items["src_feat"] = self.scaler[self.input_output[0]].transform(np.load(src_mel).T)
+        items["trg_feat"] = self.scaler[self.input_output[1]].transform(np.load(trg_mel).T)
+        items["src_condition"] = np.load(src_mel.replace(self.input_output[0], "accent_embedding"))
+        items["trg_condition"] = np.load(trg_mel.replace(self.input_output[1], "accent_embedding"))
+        items["utt_id"] = self.files[idx]
+        items["accent_id"] = 0
         
         return items

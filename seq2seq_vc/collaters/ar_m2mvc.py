@@ -59,7 +59,10 @@ class ARM2MVCCollater(object):
         olens = torch.from_numpy(np.array([y.shape[0] for y in ys])).long()
 
         # perform padding and conversion to tensor
-        xs = pad_list([torch.from_numpy(x).float() for x in xs], 0)
+        if xs[0].dtype==int:
+            xs = pad_list([torch.from_numpy(x).int() for x in xs], 0).squeeze(-1)
+        else:
+            xs = pad_list([torch.from_numpy(x).float() for x in xs], 0)
         ys = pad_list([torch.from_numpy(y).float() for y in ys], 0)
 
         # make labels for stop prediction

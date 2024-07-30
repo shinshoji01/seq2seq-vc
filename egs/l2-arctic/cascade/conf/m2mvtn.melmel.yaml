@@ -40,7 +40,7 @@ model_params:
     odim: 100
     cdim: 1024 # dimension for condition embedding
     acdim: 100 # dimension for condition embedding after embedding layer
-    conditiontype: "add" # dimension for condition embedding after embedding layer
+    conditiontype: "nocondition" # dimension for condition embedding after embedding layer
     dprenet_layers: 2  # one more linear layer w/o non-linear will be added for 0_centor
     dprenet_units: 256 # 256
     adim: 768 # 384
@@ -103,9 +103,9 @@ scheduler_params:
 ###########################################################
 #                    INTERVAL SETTING                     #
 ###########################################################
-train_max_steps: 300000                 # Number of training steps.
+train_max_steps: 500000                 # Number of training steps.
 save_interval_steps: 20000               # Interval steps to save checkpoint.
-eval_interval_steps: 20000               # Interval steps to evaluate the network.
+eval_interval_steps: 1000               # Interval steps to evaluate the network.
 log_interval_steps: 10                 # Interval steps to record the training log.
 
 ###########################################################

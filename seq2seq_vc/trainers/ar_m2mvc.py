@@ -112,6 +112,45 @@ class ARM2MVCTrainer(Trainer):
         self.steps += 1
         self.tqdm.update(1)
         self._check_train_finish()
+        
+    def _eval_step(self, batch):
+        """Evaluate model one step."""
+        
+        xs = batch["xs"].to(self.device)
+        ys = batch["ys"].to(self.device)
+        ilens = batch["ilens"].to(self.device)
+        olens = batch["olens"].to(self.device)
+        labels = batch["labels"].to(self.device)
+        xembs = batch["xembs"].to(self.device)
+        yembs = batch["yembs"].to(self.device)
+
+        # model forward
+        (
+            after_outs,
+            before_outs,
+            logits,
+            ys_,
+            labels_,
+            olens_,
+            (att_ws, ilens_ds_st, olens_in),
+        ) = self.model(xs, ilens, ys, labels, olens, xembs, yembs)
+
+        # seq2seq loss
+        l1_loss, bce_loss = self.criterion["Seq2SeqLoss"](
+            after_outs, before_outs, logits, ys_, labels_, olens_
+        )
+        gen_loss = l1_loss + bce_loss
+        self.total_eval_loss["eval/l1_loss"] += l1_loss.item()
+        self.total_eval_loss["eval/bce_loss"] += bce_loss.item()
+
+        # guided attention loss
+        if self.config.get("use_guided_attn_loss", False):
+            ga_loss = self.criterion["guided_attn"](att_ws, ilens_ds_st, olens_in)
+            gen_loss += ga_loss
+            self.total_eval_loss["eval/guided_attn_loss"] += ga_loss.item()
+
+        self.total_eval_loss["eval/loss"] += gen_loss.item()
+        
 
     @torch.no_grad()
     def _genearete_and_save_intermediate_result(self, batch):

@@ -62,6 +62,7 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
         zero_triu: bool = False,
         conformer_enc_kernel_size: int = 7,
         conformer_dec_kernel_size: int = 31,
+        encoder_input_layer: str = "conv2d-scaled-pos-enc"
     ):
         # initialize base classes
         torch.nn.Module.__init__(self)
@@ -115,7 +116,7 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
                 attention_heads=aheads,
                 linear_units=eunits,
                 num_blocks=elayers,
-                input_layer="conv2d-scaled-pos-enc",
+                input_layer=encoder_input_layer,
                 pos_enc_class=ScaledPositionalEncoding,
                 normalize_before=encoder_normalize_before,
                 concat_after=encoder_concat_after,
@@ -319,7 +320,7 @@ class M2MVTN(torch.nn.Module): # many-to-many VTN
             ]
             # if idx + 1 == self.num_layers_applied_guided_attn:
             # break
-        # att_ws = torch.cat(att_ws, dim=1)  # (B, H*L, T_out, T_in)
+        att_ws = torch.cat(att_ws, dim=1)  # (B, H*L, T_out, T_in)
 
         return (
             after_outs,

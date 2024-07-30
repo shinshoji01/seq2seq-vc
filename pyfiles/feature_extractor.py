@@ -23,7 +23,7 @@ class WavLMExtractor():
         self.device = device
     
     def get_feature(self, path):
-        wav, _ = librosa.load(path, self.fs)
+        wav, _ = librosa.load(path, sr=self.fs)
         wav_input_16khz = torch.tensor(wav).unsqueeze(0)
         if self.cfg.normalize:
             wav_input_16khz = torch.nn.functional.layer_norm(wav_input_16khz , wav_input_16khz.shape)

@@ -172,13 +172,19 @@ class Trainer(object):
         for eval_steps_per_epoch, batch in enumerate(
             tqdm(self.data_loader["dev"], desc="[eval]"), 1
         ):
-            if eval_steps_per_epoch == 1:
-                self._genearete_and_save_intermediate_result(batch)
+            # if eval_steps_per_epoch == 1:
+                # self._genearete_and_save_intermediate_result(batch)
+            self._eval_step(batch)
 
         logging.info(
             f"(Steps: {self.steps}) Finished evaluation "
             f"({eval_steps_per_epoch} steps per epoch)."
         )
+        
+        for key in self.total_eval_loss.keys():
+            self.total_eval_loss[key] /= self.config["eval_interval_steps"]
+        self._write_to_tensorboard(self.total_eval_loss)
+        self.total_eval_loss = defaultdict(float)
 
         # restore mode
         self.model.train()
