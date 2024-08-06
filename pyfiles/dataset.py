@@ -2,6 +2,7 @@ import os
 import numpy as np
 import glob
 from torch.utils.data import Dataset
+from itertools import groupby
 
 def transform(mel, defileprob=0.08, defilespan=10, defiling_ratio=[0.45, 0.45, 0.10]):
     # defiling ratio: [masking, noising, nothing]
@@ -21,7 +22,7 @@ def transform(mel, defileprob=0.08, defilespan=10, defiling_ratio=[0.45, 0.45, 0
     return mel
 
 class PretrainingMelDataset(Dataset):
-    def __init__(self, feat_base_dir, dataset_dir, scaler, mode="train", limitlength=450, defiling_ratio=[0.45,0.45,0.10], input_output_type=["mel", "mel"]):
+    def __init__(self, feat_base_dir, dataset_dir, scaler, mode="train", limitlength=450, defiling_ratio=[0.45,0.45,0.10], input_output_type=["mel", "mel"], hubertnorepeating=False):
         modename = "dev" if mode=="valid" else mode
         inputname = "" if input_output_type[0]=="mel" else f"_{input_output_type[0]}"
         if inputname=="_hubert":
@@ -52,6 +53,7 @@ class PretrainingMelDataset(Dataset):
         self.limitlength = limitlength
         self.defiling_ratio = defiling_ratio
         self.input_output_type = input_output_type
+        self.hubertnorepeating = hubertnorepeating
         
     def __len__(self):
         return len(self.files)
@@ -59,10 +61,11 @@ class PretrainingMelDataset(Dataset):
         
         inputpath = self.ifiles[idx]
         outputpath = self.files[idx]
-        accpath = outputpath[:-4] + "_accentembedding.npy"
+        add = "" if self.input_output_type[1]=="mel" else f"_{self.input_output_type[1]}"
+        accpath = outputpath[:-(len(add)+4)] + "_accentembedding.npy"
         input_type = self.input_output_type[0]
         if input_type=="hubert":
-            inputfeat = np.load(inputpath).reshape(-1, 1).astype(int)
+            inputfeat = np.load(inputpath)
         else:
             inputfeat = self.scaler[0].transform(np.load(inputpath).T)
         outputfeat = self.scaler[1].transform(np.load(outputpath).T)
@@ -74,9 +77,14 @@ class PretrainingMelDataset(Dataset):
             inputfeat = inputfeat[startinput:endinput]
             outputfeat = outputfeat[start:end]
         acc = np.load(accpath)
+        if input_type=="hubert":
+            inputfeat = list(inputfeat.astype(int))
+            if self.hubertnorepeating:
+                inputfeat = [key for key, _group in groupby(inputfeat)]
+            inputfeat = np.array(inputfeat).reshape(-1, 1).astype(int)
 
         items = {}
-        if input_type=="mel":
+        if input_type in ["mel", "80mel"]:
             items["src_feat"] = transform(inputfeat.copy(), defiling_ratio=self.defiling_ratio)
         else:
             items["src_feat"] = inputfeat
@@ -179,27 +187,38 @@ class PretrainingL2Arctic(Dataset):
         return items
     
 class ParallelArcticDataset(Dataset):
-    def __init__(self, src_dir, trg_dir, datasplit, scaler, mode="train", input_output=["wavlm", "mel"]):
+    def __init__(self, src_dir, trg_dir, datasplit, scaler, mode="train", input_output=["wavlm", "mel"], noembedding=False):
+        if type(src_dir)!=list:
+            src_dir = [src_dir]
+            trg_dir = [trg_dir]
+        assert len(src_dir)==len(trg_dir)
         modefiles = datasplit[["train", "valid", "test"].index(mode)]
-        filenames = [os.path.basename(a)[:-4] for a in glob.glob(src_dir+f"{input_output[0]}/*")]
-        filenames.sort()
-        files = []
-        for fn in filenames:
-            if fn in modefiles:
-                exist = True
-                if not(os.path.exists(f"{trg_dir}{input_output[1]}/{fn}.npy")):
-                    exist = False
-                    break
-                if exist:
-                    files += [fn]
+        
         data = {}
-        data["src"] = [src_dir + f"{input_output[0]}/{fn}.npy" for fn in files]
-        data["trg"] = [trg_dir + f"{input_output[1]}/{fn}.npy" for fn in files]
+        data["src"] = []
+        data["trg"] = []
+        allfiles = []
+        for diridx in range(len(src_dir)):
+            src = src_dir[diridx]
+            trg = trg_dir[diridx]
+            
+            filenames = [os.path.basename(a)[:-4] for a in glob.glob(src+f"{input_output[0]}/*.npy")]
+            filenames.sort()
+            files = []
+            for fn in filenames:
+                if fn in modefiles:
+                    if os.path.exists(f"{trg}{input_output[1]}/{fn}.npy"):
+                        files += [fn]
+            allfiles += files
+            print(len(files), src)
+            data["src"] += [src + f"{input_output[0]}/{fn}.npy" for fn in files]
+            data["trg"] += [trg + f"{input_output[1]}/{fn}.npy" for fn in files]
             
         self.data = data
         self.scaler = scaler
-        self.files = files
+        self.files = allfiles
         self.input_output = input_output
+        self.noembedding = noembedding
         
     def __len__(self):
         return len(self.files)
@@ -210,8 +229,13 @@ class ParallelArcticDataset(Dataset):
         trg_mel = self.data["trg"][idx]
         items["src_feat"] = self.scaler[self.input_output[0]].transform(np.load(src_mel).T)
         items["trg_feat"] = self.scaler[self.input_output[1]].transform(np.load(trg_mel).T)
-        items["src_condition"] = np.load(src_mel.replace(self.input_output[0], "accent_embedding"))
-        items["trg_condition"] = np.load(trg_mel.replace(self.input_output[1], "accent_embedding"))
+        try:
+            items["src_condition"] = np.load(src_mel.replace(self.input_output[0], "accent_embedding"))
+            items["trg_condition"] = np.load(trg_mel.replace(self.input_output[1], "accent_embedding"))
+        except FileNotFoundError:
+            assert self.noembedding
+            items["src_condition"] = np.random.randn(1024)
+            items["trg_condition"] = np.random.randn(1024)
         items["utt_id"] = self.files[idx]
         items["accent_id"] = 0
         
