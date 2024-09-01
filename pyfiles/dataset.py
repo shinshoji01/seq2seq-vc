@@ -22,20 +22,27 @@ def transform(mel, defileprob=0.08, defilespan=10, defiling_ratio=[0.45, 0.45, 0
     return mel
 
 class PretrainingMelDataset(Dataset):
-    def __init__(self, feat_base_dir, dataset_dir, scaler, mode="train", limitlength=450, defiling_ratio=[0.45,0.45,0.10], input_output_type=["mel", "mel"], hubertnorepeating=False):
+    def __init__(self, feat_base_dir, dataset_dir, scaler, mode="train", limitlength=450, defiling_ratio=[0.45,0.45,0.10], input_output_type=["mel", "mel"], hubertnorepeating=False, noembedding=False):
         modename = "dev" if mode=="valid" else mode
         inputname = "" if input_output_type[0]=="mel" else f"_{input_output_type[0]}"
-        if inputname=="_hubert":
-            inputname = "_hubert_km500"
+        if "hubert" in inputname:
+            if "1000" in inputname:
+                inputname = "_hubert_km1000"
+            elif "300" in inputname:
+                inputname = "_hubert_km300"
+            else:
+                inputname = "_hubert_km500"
         outputname = "" if input_output_type[1]=="mel" else f"_{input_output_type[1]}"
 
         speakers = [os.path.basename(a) for a in glob.glob(dataset_dir + "*/*")]
         speakers.sort()
         files = []
         for spk in speakers:
-            for pt in glob.glob(feat_base_dir + f"{modename}*/{spk}/*/*[0-9]{inputname}.npy"):
+            filelist = glob.glob(feat_base_dir + f"{modename}*/{spk}/*/*[0-9]{inputname}.npy")
+            filelist.sort()
+            for pt in filelist:
                 if inputname=="":
-                    if "_hubert_km500" in pt:
+                    if "_hubert_km" in pt:
                         continue
                 files += [pt]
         ifiles = []
@@ -54,6 +61,7 @@ class PretrainingMelDataset(Dataset):
         self.defiling_ratio = defiling_ratio
         self.input_output_type = input_output_type
         self.hubertnorepeating = hubertnorepeating
+        self.noembedding = noembedding
         
     def __len__(self):
         return len(self.files)
@@ -62,9 +70,8 @@ class PretrainingMelDataset(Dataset):
         inputpath = self.ifiles[idx]
         outputpath = self.files[idx]
         add = "" if self.input_output_type[1]=="mel" else f"_{self.input_output_type[1]}"
-        accpath = outputpath[:-(len(add)+4)] + "_accentembedding.npy"
         input_type = self.input_output_type[0]
-        if input_type=="hubert":
+        if "hubert" in input_type:
             inputfeat = np.load(inputpath)
         else:
             inputfeat = self.scaler[0].transform(np.load(inputpath).T)
@@ -76,7 +83,6 @@ class PretrainingMelDataset(Dataset):
             endinput = int(inputfeat.shape[0]*end/outputfeat.shape[0])
             inputfeat = inputfeat[startinput:endinput]
             outputfeat = outputfeat[start:end]
-        acc = np.load(accpath)
         if input_type=="hubert":
             inputfeat = list(inputfeat.astype(int))
             if self.hubertnorepeating:
@@ -84,13 +90,20 @@ class PretrainingMelDataset(Dataset):
             inputfeat = np.array(inputfeat).reshape(-1, 1).astype(int)
 
         items = {}
-        if input_type in ["mel", "80mel"]:
+        if input_type in ["mel", "80mel", "hifiganmel"]:
             items["src_feat"] = transform(inputfeat.copy(), defiling_ratio=self.defiling_ratio)
         else:
             items["src_feat"] = inputfeat
         items["trg_feat"] = outputfeat
-        items["src_condition"] = acc
-        items["trg_condition"] = acc
+        try:
+            accpath = outputpath[:-(len(add)+4)] + "_accentembedding.npy"
+            acc = np.load(accpath)
+            items["src_condition"] = np.load(src_mel.replace(self.input_output[0], "accent_embedding"))
+            items["trg_condition"] = np.load(trg_mel.replace(self.input_output[1], "accent_embedding"))
+        except FileNotFoundError:
+            assert self.noembedding
+            items["src_condition"] = np.random.randn(1024)
+            items["trg_condition"] = np.random.randn(1024)
         items["accent_id"] = 0
         
         return items
